@@ -855,8 +855,8 @@ func handlerGroupDelete(w http.ResponseWriter, r *http.Request, ps httprouter.Pa
 		//but in some corner cases, group is listed but not found in kv
 		//and user want delete group to relearn, so we will delete group
 		//from cache, but limit practice to learned group(nv.x.x)
-		if utils.IsGroupLearned(name) && !strings.HasPrefix(name, api.LearnedSvcGroupPrefix) && !utils.IsGroupNodes(name){
-			err1 :=cacher.DeleteGroupCache(name, acc)
+		if utils.IsGroupLearned(name) && !strings.HasPrefix(name, api.LearnedSvcGroupPrefix) && !utils.IsGroupNodes(name) {
+			err1 := cacher.DeleteGroupCache(name, acc)
 			if err1 != nil {
 				restRespAccessDenied(w, login)
 			} else {
@@ -1811,6 +1811,7 @@ func importGroupPolicy(scope string, loginDomainRoles access.DomainRole, importT
 				for i, grpCfgRet := range parsedGrpCfg {
 					var crdRecord share.CLUSCrdSecurityRule // leverage CLUSCrdSecurityRule but we don't save it in kv
 					var profile_mode string
+					var baseline string
 					if grpCfgRet.ProcessProfileCfg != nil {
 						// nodes, containers, service or user-defined groups
 						profile_mode = grpCfgRet.ProcessProfileCfg.Mode
@@ -1828,9 +1829,9 @@ func importGroupPolicy(scope string, loginDomainRoles access.DomainRole, importT
 
 					if crdRecord.ProfileName != "" {
 						secRuleName := fmt.Sprintf("group-import-%d", i)
-						profile_mode = crdHandler.crdRebuildGroupProfiles(crdRecord.ProfileName, map[string]*share.CLUSCrdSecurityRule{secRuleName: &crdRecord}, share.ReviewTypeImportGroup)
+						profile_mode, baseline = crdHandler.crdRebuildGroupProfiles(crdRecord.ProfileName, map[string]*share.CLUSCrdSecurityRule{secRuleName: &crdRecord}, share.ReviewTypeImportGroup)
 					}
-					crdHandler.crdHandlePolicyMode(grpCfgRet.PolicyModeCfg, profile_mode)
+					crdHandler.crdHandlePolicyMode(grpCfgRet.PolicyModeCfg, profile_mode, baseline)
 
 					if hasDlpWafSetting, ok := targetGroupDlpWAF[grpCfgRet.TargetName]; ok && hasDlpWafSetting {
 						if grpCfgRet.DlpGroupCfg == nil {

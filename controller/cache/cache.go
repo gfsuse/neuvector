@@ -101,6 +101,7 @@ type workloadCache struct {
 	platformRole     string
 	displayName      string
 	podName          string
+	svcChanged       string // old learned group name
 	serviceAccount   string
 	scanBrief        *api.RESTScanBrief    // Stats of filtered entries
 	vulTraits        []*scanUtils.VulTrait // Full list of vuls. There is a filtered flag on each entry.
@@ -1313,6 +1314,9 @@ func (m CacheMethod) GetAllWorkloadsRisk(acc *access.AccessControl) []*common.Wo
 		if common.OEMIgnoreWorkload(cache.workload) {
 			continue
 		}
+		if !cache.workload.Running {
+			continue
+		}
 
 		if cache.workload.ShareNetNS == "" {
 			wl := workload2Risk(cache)
@@ -1813,12 +1817,16 @@ func startWorkerThread(ctx *Context) {
 					if ev.ResourceOld != nil {
 						o = ev.ResourceOld.(*resource.Namespace)
 					}
-					if n == nil {
-						if o != nil {
-							domainDelete(o.Name)
+					if n != nil {
+						// ignore neuvector domain
+						if n.Name != localDev.Ctrler.Domain {
+							domainAdd(n.Name, n.Labels)
+						} else {
+							// for the upgrade cas
+							domainDelete(n.Name)
 						}
-					} else {
-						domainAdd(n.Name, n.Labels)
+					} else if o != nil {
+						domainDelete(o.Name)
 					}
 					if n != nil {
 						if skip := atomic.LoadUint32(&nvDeployDeleted); skip == 0 && isLeader() && admission.IsNsSelectorSupported() {
@@ -2031,7 +2039,7 @@ func refreshK8sAdminWebhookStateCache(oldConfig, newConfig *resource.AdmissionWe
 	}
 }
 
-func Init(ctx *Context, leader bool, leadAddr string) CacheInterface {
+func Init(ctx *Context, leader bool, leadAddr, restoredFedRole string) CacheInterface {
 	log.WithFields(log.Fields{"isLeader": leader, "leadAddr": leadAddr}).Info()
 
 	cctx = ctx
@@ -2065,7 +2073,7 @@ func Init(ctx *Context, leader bool, leadAddr string) CacheInterface {
 	scanInit()
 
 	crdInit()
-	fedInit()
+	fedInit(restoredFedRole)
 	// Keep license update at last. Data structure preparation should be done before this point,
 	// license update will update the limit and could trigger actions
 	licenseInit()

@@ -280,7 +280,10 @@ func _deleteSessionToken(s *loginSession) {
 	}
 
 	key := share.CLUSExpiredTokenKey(s.token)
-	jwtLastExpiredTokenSession.Associate(key)
+	err := jwtLastExpiredTokenSession.Associate(key)
+	if err != nil {
+		log.WithFields(log.Fields{"id": s.id, "err": err}).Error()
+	}
 }
 
 // with userMutex locked when calling this
@@ -1167,7 +1170,7 @@ func jwtValidateToken(encryptedToken, secret string, rsaPublicKey *rsa.PublicKey
 	var publicKey *rsa.PublicKey
 
 	if secret == "" {
-		tokenString = utils.DecryptPasswordRaw(encryptedToken)
+		tokenString = utils.DecryptUserToken(encryptedToken)
 	} else {
 		tokenString = utils.DecryptSensitive(encryptedToken, []byte(secret))
 	}
@@ -1275,7 +1278,7 @@ func jwtGenerateToken(user *share.CLUSUser, roles access.DomainRole, remote, mai
 	c.StandardClaims.IssuedAt = now.Add(_halfHourBefore).Unix() // so that token won't be invalidated among controllers because of system time diff & iat
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, c)
 	tokenString, _ := token.SignedString(jwtPrivateKey)
-	return id, utils.EncryptPasswordRaw(tokenString), &c
+	return id, utils.EncryptUserToken(tokenString), &c
 }
 
 func jwtGenFedJoinToken(masterCluster *api.RESTFedMasterClusterInfo, duration time.Duration) []byte {
@@ -1769,7 +1772,7 @@ func localPasswordAuth(pw *api.RESTAuthPassword, acc *access.AccessControl) (*sh
 	var user *share.CLUSUser
 	var blockAfterFailedCount int
 
-	if pw.Username[0] == '~' {
+	if pw.Username == "" || pw.Username[0] == '~' {
 		return nil, false, false, false, 0, errors.New("User not found")
 	}
 	now := time.Now()

@@ -265,7 +265,7 @@ func assocWl2PolicyIds(grp string, senset utils.Set, outside_wl2sensor map[strin
 	if grpcache, ok := groupCacheMap[grp]; ok {
 		for _, m := range grpcache.members.ToSlice() {
 			wlid := m.(string)
-			if wlcache, ok := wlCacheMap[wlid]; ok {
+			if wlcache, ok := wlCacheMap[wlid]; ok && wlcache.workload.HasDatapath {
 				inside_grps = inside_grps.Union(wlcache.groups)
 			}
 		}
@@ -303,6 +303,10 @@ func assocWl2PolicyIds(grp string, senset utils.Set, outside_wl2sensor map[strin
 	if grpcache, ok := groupCacheMap[grp]; ok {
 		for _, m := range grpcache.members.ToSlice() {
 			wlid := m.(string)
+			//only include wl that has datapath to save memory and cpu
+			if wlcache, exist := wlCacheMap[wlid]; exist && !wlcache.workload.HasDatapath {
+				continue
+			}
 			if rids, ok := wl2policies[wlid]; !ok {
 				wl2policies[wlid] = inside_ruleids
 			} else {
@@ -316,6 +320,10 @@ func assocWl2PolicyIds(grp string, senset utils.Set, outside_wl2sensor map[strin
 		if ogrpcache, ok := groupCacheMap[ogrp]; ok {
 			for _, om := range ogrpcache.members.ToSlice() {
 				owlid := om.(string)
+				//only include wl that has datapath to save memory and cpu
+				if wlcache, exist := wlCacheMap[owlid]; exist && !wlcache.workload.HasDatapath {
+					continue
+				}
 				if orids, ok := outside_wl2policies[owlid]; !ok {
 					outside_wl2policies[owlid] = outside_ruleids
 				} else {
@@ -356,6 +364,10 @@ func assocWl2Sensors(grp string, senset utils.Set, wl2sensors map[string]map[str
 		}
 		for _, m := range grpcache.members.ToSlice() {
 			wlid := m.(string)
+			//only include wl that has datapath to save memory and cpu
+			if wlcache, exist := wlCacheMap[wlid]; exist && !wlcache.workload.HasDatapath {
+				continue
+			}
 			if sam, ok := wl2sensors[wlid]; !ok {
 				if wl2sensors[wlid] == nil {
 					wl2sensors[wlid] = make(map[string]string)
@@ -394,6 +406,18 @@ func processDlpGroupPolicy(wl2sensors, outside_wl2sensor map[string]map[string]s
 	}
 }
 
+func IsAllPatternEmpty(dre *share.CLUSDlpRule) bool {
+	if dre != nil {
+		for _, cpt := range dre.Patterns {
+			if cpt.Value != "" {
+				return false
+			}
+		}
+	}
+
+	return true
+}
+
 func assocWl2RuleNames(wl2sensors, wl2rules map[string]map[string]string) {
 	log.Debug("")
 	for wlid, sens := range wl2sensors {
@@ -402,6 +426,11 @@ func assocWl2RuleNames(wl2sensors, wl2rules map[string]map[string]string) {
 				if cdr.Name == share.CLUSDlpDefaultSensor {
 					//user created rule
 					for _, cdre := range cdr.RuleList {
+						//ignore all pattern empty rule
+						if IsAllPatternEmpty(cdre) {
+							continue
+						}
+
 						if ram, ok := wl2rules[wlid]; !ok {
 							if wl2rules[wlid] == nil {
 								wl2rules[wlid] = make(map[string]string)
@@ -436,6 +465,15 @@ func assocWl2RuleNames(wl2sensors, wl2rules map[string]map[string]string) {
 					}
 				} else {
 					for _, cdrename := range cdr.RuleListNames {
+						cdrelist := getPreDlpRuleFromDefaultSensor(cdrename)
+						//only non-predefined rule check for empty pattern
+						if cdrelist == nil {
+							//ignore all pattern empty rule
+							cdre := getDlpRuleFromDefaultSensor(cdrename)
+							if IsAllPatternEmpty(cdre) {
+								continue
+							}
+						}
 						if ram, ok := wl2rules[wlid]; !ok {
 							if wl2rules[wlid] == nil {
 								wl2rules[wlid] = make(map[string]string)
@@ -613,6 +651,11 @@ func calculateGroupDlpRulesFromCache() share.CLUSWorkloadDlpRules {
 
 	for _, drelist := range dlprulemap {
 		for _, dre := range drelist {
+			//ignore empty pattern rule to be calculated for DlpRuleList
+			if IsAllPatternEmpty(dre) {
+				continue
+			}
+
 			cgdrs.DlpRuleList = append(cgdrs.DlpRuleList, dre)
 		}
 	}

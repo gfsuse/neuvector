@@ -1097,6 +1097,7 @@ var CLUSWLFqdnVhPrefix string = "vh:"
 var CLUSLearnedHostPrefix string = "Host:"
 var CLUSLearnedWorkloadPrefix string = "Workload:"
 var CLUSEndpointIngress string = "ingress"
+var CLUSWLAllContainer string = "nv.allcontainer"
 
 const DefaultGroupRuleID uint32 = 0
 const PolicyLearnedIDBase = 10000

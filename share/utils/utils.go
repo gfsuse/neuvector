@@ -475,6 +475,60 @@ func GetPortRangeLink(ipproto uint8, port uint16, portR uint16) string {
 	}
 }
 
+func GetCommonPorts(ports1 string, ports2 string) string {
+	var p, pp string = "", ""
+	var low, high uint16
+	var proto uint8
+
+	p1 := strings.Split(ports1, ",")
+	p2 := strings.Split(ports2, ",")
+	for _, pp1 := range p1 {
+		proto1, low1, high1, err := ParsePortRangeLink(pp1)
+		if err != nil {
+			// log.WithFields(log.Fields{"port": ports1}).Error("Fail to parse")
+			continue
+		}
+		for _, pp2 := range p2 {
+			proto2, low2, high2, err := ParsePortRangeLink(pp2)
+			if err != nil {
+				// log.WithFields(log.Fields{"port": ports2}).Error("Fail to parse")
+				continue
+			}
+
+			if proto1 == 0 {
+				proto = proto2
+			} else if proto2 == 0 {
+				proto = proto1
+			} else if proto1 == proto2 {
+				proto = proto1
+			} else {
+				continue
+			}
+			if high1 < low2 || high2 < low1 {
+				continue
+			}
+			if low1 > low2 {
+				low = low1
+			} else {
+				low = low2
+			}
+			if high1 > high2 {
+				high = high2
+			} else {
+				high = high1
+			}
+			pp = GetPortRangeLink(proto, low, high)
+			if p == "" {
+				p = pp
+			} else {
+				p = fmt.Sprintf("%s,%s", p, pp)
+			}
+		}
+	}
+	//log.WithFields(log.Fields{"ports1": ports1, "ports2": ports2, "common": p}).Debug()
+	return p
+}
+
 func InterpretIP(ip, ipR net.IP) string {
 	str := ip.String()
 	if ipR != nil {
@@ -865,7 +919,7 @@ func DecryptFromBase64(encryptionKey []byte, b64 string) (string, error) {
 	}
 }
 
-func EncryptToRawBase64(key, text []byte) (string, error) {
+func EncryptToRawStdBase64(key, text []byte) (string, error) {
 	if ciphertext, err := Encrypt(key, text); err == nil {
 		return base64.RawStdEncoding.EncodeToString(ciphertext), nil
 	} else {
@@ -873,8 +927,29 @@ func EncryptToRawBase64(key, text []byte) (string, error) {
 	}
 }
 
-func DecryptFromRawBase64(key []byte, b64 string) (string, error) {
+func DecryptFromRawStdBase64(key []byte, b64 string) (string, error) {
 	text, err := base64.RawStdEncoding.DecodeString(b64)
+	if err != nil {
+		return "", err
+	}
+
+	if text, err = Decrypt(key, text); err == nil {
+		return string(text), nil
+	} else {
+		return "", err
+	}
+}
+
+func EncryptToRawURLBase64(key, text []byte) (string, error) {
+	if ciphertext, err := Encrypt(key, text); err == nil {
+		return base64.RawURLEncoding.EncodeToString(ciphertext), nil
+	} else {
+		return "", err
+	}
+}
+
+func DecryptFromRawURLBase64(key []byte, b64 string) (string, error) {
+	text, err := base64.RawURLEncoding.DecodeString(b64)
 	if err != nil {
 		return "", err
 	}
@@ -936,21 +1011,44 @@ func EncryptSensitive(data string, key []byte) string {
 	return encrypted
 }
 
-func DecryptPasswordRaw(encrypted string) string {
+func DecryptUserToken(encrypted string) string {
 	if encrypted == "" {
 		return ""
 	}
 
-	password, _ := DecryptFromRawBase64(getPasswordSymKey(), encrypted)
+	encrypted = strings.ReplaceAll(encrypted, "_", "/")
+	token, _ := DecryptFromRawStdBase64(getPasswordSymKey(), encrypted)
+	return token
+}
+
+// User token cannot have / in it and cannot have - as the first char.
+func EncryptUserToken(token string) string {
+	if token == "" {
+		return ""
+	}
+
+	// Std base64 encoding has + and /, instead of - and _ (url encoding)
+	// token can be part of kv key, so we replace / with _
+	encrypted, _ := EncryptToRawStdBase64(getPasswordSymKey(), []byte(token))
+	encrypted = strings.ReplaceAll(encrypted, "/", "_")
+	return encrypted
+}
+
+func DecryptURLSafe(encrypted string) string {
+	if encrypted == "" {
+		return ""
+	}
+
+	password, _ := DecryptFromRawURLBase64(getPasswordSymKey(), encrypted)
 	return password
 }
 
-func EncryptPasswordRaw(password string) string {
+func EncryptURLSafe(password string) string {
 	if password == "" {
 		return ""
 	}
 
-	encrypted, _ := EncryptToRawBase64(getPasswordSymKey(), []byte(password))
+	encrypted, _ := EncryptToRawURLBase64(getPasswordSymKey(), []byte(password))
 	return encrypted
 }
 
