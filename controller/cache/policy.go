@@ -1249,6 +1249,9 @@ func isWlRelate2Node(wlid string) bool {
 }
 
 func reorgPolicyIPRulesPerNodePAI(rules []share.CLUSGroupIPPolicy) {
+	if nodePolicy == nil {
+		nodePolicy = make(map[string][]share.CLUSGroupIPPolicy)
+	}
 	//important: order in rules needs to be preserved
 	for idx, rul := range rules {
 		if idx == 0 {
@@ -1256,9 +1259,6 @@ func reorgPolicyIPRulesPerNodePAI(rules []share.CLUSGroupIPPolicy) {
 			continue
 		}
 		if isWl4AllNode(rul.To[0].WlID) {
-			if nodePolicy == nil {
-				nodePolicy = make(map[string][]share.CLUSGroupIPPolicy)
-			}
 			//push policy to all nodes
 			for _, nid := range nodNod {
 				if nodePolicy[nid] == nil {
@@ -1289,9 +1289,6 @@ func reorgPolicyIPRulesPerNodePAI(rules []share.CLUSGroupIPPolicy) {
 			//if destination group is not container group
 			//use source group to decide which node
 			if isWl4AllNode(rul.From[0].WlID) {
-				if nodePolicy == nil {
-					nodePolicy = make(map[string][]share.CLUSGroupIPPolicy)
-				}
 				//push policy to all nodes
 				for _, nid := range nodNod {
 					if nodePolicy[nid] == nil {
@@ -1325,6 +1322,9 @@ func reorgPolicyIPRulesPerNodePAI(rules []share.CLUSGroupIPPolicy) {
 }
 
 func reorgPolicyIPRulesPerNode(rules []share.CLUSGroupIPPolicy) {
+	if nodePolicy == nil {
+		nodePolicy = make(map[string][]share.CLUSGroupIPPolicy)
+	}
 	//important: order in rules needs to be preserved
 	for idx, rul := range rules {
 		if idx == 0 {
@@ -1332,9 +1332,6 @@ func reorgPolicyIPRulesPerNode(rules []share.CLUSGroupIPPolicy) {
 			continue
 		}
 		if isWl4AllNode(rul.From[0].WlID) {
-			if nodePolicy == nil {
-				nodePolicy = make(map[string][]share.CLUSGroupIPPolicy)
-			}
 			//push policy to all nodes
 			for _, nid := range nodNod {
 				if nodePolicy[nid] == nil {
@@ -1365,9 +1362,6 @@ func reorgPolicyIPRulesPerNode(rules []share.CLUSGroupIPPolicy) {
 			//if destination group is not container group
 			//use source group to decide which node
 			if isWl4AllNode(rul.To[0].WlID) {
-				if nodePolicy == nil {
-					nodePolicy = make(map[string][]share.CLUSGroupIPPolicy)
-				}
 				//push policy to all nodes
 				for _, nid := range nodNod {
 					if nodePolicy[nid] == nil {
@@ -1719,6 +1713,10 @@ func putPolicyIPRulesToClusterScaleNode(rules []share.CLUSGroupIPPolicy) {
 		}
 	}
 	tmpNid := make(map[string]string)
+	ver_pushed := make(map[string]bool)
+	for _, nd := range nodNod {
+		ver_pushed[nd] = false
+	}
 	for nid, nodRules := range nodePolicy {
 		node_zbs, _, _, err := preparePolicySlotsNode(nodRules, wlens)
 		if err != nil {
@@ -1757,6 +1755,36 @@ func putPolicyIPRulesToClusterScaleNode(rules []share.CLUSGroupIPPolicy) {
 			log.WithFields(log.Fields{"error": err}).Error("Failed to write network policy version to the cluster")
 			policyIPRulesCleanupNode(rule_key, verstr, newCommonRuleKey, tmpNid)
 			return
+		}
+		ver_pushed[nid] = true
+	}
+	//although there is no existing policy for some/all nodes,
+	//we still need to let relevant nodes know there are new
+	//workload detected so policy can be learned on workload.
+	if len(common_zbs) > 0 {
+		for _, nid := range nodNod {
+			if pushed, ok := ver_pushed[nid]; ok && !pushed {
+				//new kv to indicate rule change
+				polVer := share.CLUSGroupIPPolicyVer{
+					Key:                  share.PolicyIPRulesVersionID,
+					PolicyIPRulesVersion: verstr,
+					NodeId:               nid,
+					CommonSlotNo:         len(common_zbs),
+					CommonRulesLen:       wlslots,
+					SlotNo:               0,
+					RulesLen:             0,
+					WorkloadSlot:         wlslots,
+					WorkloadLen:          wlens,
+				}
+				log.WithFields(log.Fields{"node": nid, "policyVer": polVer}).Debug("New policy address written")
+
+				clusHelper := kv.GetClusterHelper()
+				if err = clusHelper.PutPolicyVerNode(&polVer); err != nil {
+					log.WithFields(log.Fields{"error": err}).Error("Failed to put network policy version to the cluster")
+					policyIPRulesCleanupNode(rule_key, verstr, newCommonRuleKey, tmpNid)
+					return
+				}
+			}
 		}
 	}
 	policyIPRulesCleanup(oldKeys)
