@@ -27,7 +27,6 @@ type AgentEnvInfo struct {
 	memoryLimit          uint64
 	peakMemoryUsage      uint64
 	snapshotMemStep      uint64
-	noNetRule            bool
 }
 
 const (
