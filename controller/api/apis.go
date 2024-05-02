@@ -328,6 +328,7 @@ type RESTServerLDAP struct {
 	Port            uint16 `json:"port"`
 	SSL             bool   `json:"ssl"`
 	BaseDN          string `json:"base_dn"`
+	GroupDN         string `json:"group_dn"`
 	BindDN          string `json:"bind_dn"`
 	BindPasswd      string `json:"bind_password,cloak"`
 	GroupMemberAttr string `json:"group_member_attr"`
@@ -410,6 +411,7 @@ type RESTServerLDAPConfig struct {
 	Port            *uint16 `json:"port,omitempty"`
 	SSL             *bool   `json:"ssl,omitempty"`
 	BaseDN          *string `json:"base_dn,omitempty"`
+	GroupDN         *string `json:"group_dn,omitempty"`
 	BindDN          *string `json:"bind_dn,omitempty"`
 	BindPasswd      *string `json:"bind_password,cloak,omitempty"`
 	GroupMemberAttr *string `json:"group_member_attr,omitempty"`
@@ -2112,6 +2114,27 @@ type RESTScanStatusData struct {
 	Status *RESTScanStatus `json:"status"`
 }
 
+type RESTScanCacheStat struct {
+	RecordCnt       uint64  `json:"record_count,omitempty"`
+	RecordSize      uint64	`json:"record_total_size,omitempty"`
+	MissCnt         uint64	`json:"cache_misses,omitempty"`
+	HitCnt          uint64	`json:"cache_hits,omitempty"`
+}
+
+type RESTScanCacheRecord struct {
+	Layer	string		`json:"layer_id,omitempty"`
+	Size	uint64		`json:"size,omitempty"`
+	RefCnt	uint32		`json:"reference_count,omitempty"`
+	RefLast	time.Time	`json:"last_referred,omitempty"`
+}
+
+type RESTScanCacheData struct {
+	CacheRecords 	[]RESTScanCacheRecord	`json:"cache_records,omitempty"`
+	RecordSize      uint64	`json:"record_total_size,omitempty"`
+	MissCnt         uint64	`json:"cache_misses,omitempty"`
+	HitCnt          uint64	`json:"cache_hits,omitempty"`
+}
+
 const ScanStatusIdle string = ""
 const ScanStatusScheduled string = "scheduled"
 const ScanStatusScanning string = "scanning"
@@ -3152,6 +3175,45 @@ type RESTGCRKeyConfig struct {
 	JsonKey *string `json:"json_key,omitempty,cloak"`
 }
 
+type RESTRegistryV2 struct {
+	Name         string                   `json:"name"`
+	Type         string                   `json:"registry_type"`
+	Registry     string                   `json:"registry"`
+	Domains      []string                 `json:"domains"`
+	Filters      []string                 `json:"filters"`
+	CfgType      string                   `json:"cfg_type"`
+	Auth         RESTRegistryAuth         `json:"auth,omitempty"`
+	Scan         RESTRegistryScan         `json:"scan,omitempty"`
+	Integrations RESTRegistryIntegrations `json:"integrations,omitempty"`
+}
+
+type RESTRegistryAuth struct {
+	Username      string            `json:"username,omitempty"`
+	Password      string            `json:"password,omitempty,cloak"`
+	AuthToken     string            `json:"auth_token,omitempty,cloak"`
+	AuthWithToken bool              `json:"auth_with_token,omitempty"`
+	AwsKey        RESTAWSAccountKey `json:"aws_key,omitempty"`
+	GcrKey        RESTGCRKey        `json:"gcr_key,omitempty"`
+}
+
+type RESTRegistryScan struct {
+	RescanImage bool             `json:"rescan_after_db_update,omitempty"`
+	ScanLayers  bool             `json:"scan_layers,omitempty"`
+	RepoLimit   int              `json:"repo_limit,omitempty"`
+	TagLimit    int              `json:"tag_limit,omitempty"`
+	Schedule    RESTScanSchedule `json:"schedule,omitempty"`
+	IgnoreProxy bool             `json:"ignore_proxy,omitempty"`
+}
+
+type RESTRegistryIntegrations struct {
+	JfrogMode          string `json:"jfrog_mode,omitempty"`
+	JfrogAQL           bool   `json:"jfrog_aql,omitempty"`
+	GitlabApiUrl       string `json:"gitlab_external_url,omitempty"`
+	GitlabPrivateToken string `json:"gitlab_private_token,omitempty,cloak"`
+	IBMCloudTokenURL   string `json:"ibm_cloud_token_url,omitempty"`
+	IBMCloudAccount    string `json:"ibm_cloud_account,omitempty"`
+}
+
 type RESTRegistry struct {
 	Name               string             `json:"name"`
 	Type               string             `json:"registry_type"`
@@ -3176,6 +3238,7 @@ type RESTRegistry struct {
 	IBMCloudTokenURL   string             `json:"ibm_cloud_token_url"`
 	IBMCloudAccount    string             `json:"ibm_cloud_account"`
 	CfgType            string             `json:"cfg_type"`
+	IgnoreProxy        bool               `json:"ignore_proxy"`
 }
 
 type RESTRegistryConfig struct {
@@ -3202,10 +3265,54 @@ type RESTRegistryConfig struct {
 	IBMCloudTokenURL   *string                  `json:"ibm_cloud_token_url,omitempty"`
 	IBMCloudAccount    *string                  `json:"ibm_cloud_account,omitempty"`
 	CfgType            string                   `json:"cfg_type"` // CfgTypeUserCreated / CfgTypeGround / CfgTypeFederal (see above)
+	IgnoreProxy        *bool                    `json:"ignore_proxy,omitempty"`
+}
+
+type RESTRegistryConfigV2 struct {
+	Name         string                          `json:"name"`
+	Type         string                          `json:"registry_type"`
+	Registry     *string                         `json:"registry,omitempty"`
+	Domains      *[]string                       `json:"domains,omitempty"`
+	Filters      *[]string                       `json:"filters,omitempty"`
+	CfgType      string                          `json:"cfg_type"` // CfgTypeUserCreated / CfgTypeGround / CfgTypeFederal (see above)
+	Auth         *RESTRegistryConfigAuth         `json:"auth,omitempty"`
+	Scan         *RESTRegistryConfigScan         `json:"scan,omitempty"`
+	Integrations *RESTRegistryConfigIntegrations `json:"integrations,omitempty"`
+}
+
+type RESTRegistryConfigAuth struct {
+	Username      *string                  `json:"username,omitempty"`
+	Password      *string                  `json:"password,omitempty,cloak"`
+	AuthToken     *string                  `json:"auth_token,omitempty,cloak"`
+	AuthWithToken *bool                    `json:"auth_with_token,omitempty"`
+	AwsKey        *RESTAWSAccountKeyConfig `json:"aws_key,omitempty"`
+	GcrKey        *RESTGCRKeyConfig        `json:"gcr_key,omitempty"`
+}
+
+type RESTRegistryConfigScan struct {
+	RescanImage *bool             `json:"rescan_after_db_update,omitempty"`
+	ScanLayers  *bool             `json:"scan_layers,omitempty"`
+	RepoLimit   *int              `json:"repo_limit,omitempty"`
+	TagLimit    *int              `json:"tag_limit,omitempty"`
+	Schedule    *RESTScanSchedule `json:"schedule,omitempty"`
+	IgnoreProxy *bool             `json:"ignore_proxy,omitempty"`
+}
+
+type RESTRegistryConfigIntegrations struct {
+	JfrogMode          *string `json:"jfrog_mode,omitempty"`
+	JfrogAQL           *bool   `json:"jfrog_aql,omitempty"`
+	GitlabApiUrl       *string `json:"gitlab_external_url,omitempty"`
+	GitlabPrivateToken *string `json:"gitlab_private_token,omitempty,cloak"`
+	IBMCloudTokenURL   *string `json:"ibm_cloud_token_url,omitempty"`
+	IBMCloudAccount    *string `json:"ibm_cloud_account,omitempty"`
 }
 
 type RESTRegistryConfigData struct {
 	Config *RESTRegistryConfig `json:"config"`
+}
+
+type RESTRegistryConfigDataV2 struct {
+	Config *RESTRegistryConfigV2 `json:"config"`
 }
 
 type RESTRegistrySummary struct {

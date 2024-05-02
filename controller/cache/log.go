@@ -17,7 +17,6 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/neuvector/neuvector/controller/access"
-	//"github.com/neuvector/neuvector/controller/nvk8sapi/nvvalidatewebhookcfg"
 	"github.com/neuvector/neuvector/controller/api"
 	"github.com/neuvector/neuvector/controller/common"
 	nvsysadmission "github.com/neuvector/neuvector/controller/nvk8sapi/nvvalidatewebhookcfg/admission"
@@ -1841,7 +1840,7 @@ func scanReport2BenchLog(id string, objType share.ScanObjectType, report *share.
 		clog.Tag = report.Tag
 	}
 
-	_, metaMap := scanUtils.GetComplianceMeta()
+	_, metaMap := scanUtils.GetImageBenchMeta()
 	runAsRoot, hasADD, hasHEALTHCHECK := scanUtils.ParseImageCmds(report.Cmds)
 
 	clog.Items = make([]string, 0)

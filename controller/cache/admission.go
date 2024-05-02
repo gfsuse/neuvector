@@ -141,6 +141,29 @@ func initCache() {
 	cacheMutexLock()
 	defer cacheMutexUnlock()
 
+	var checkAllowNsRuleCfgType share.TCfgType
+	m := clusHelper.GetFedMembership()
+	if m != nil {
+		fedMembershipCache.FedRole = m.FedRole
+		if fedMembershipCache.FedRole != api.FedRoleNone {
+			checkAllowNsRuleCfgType = share.FederalCfg
+		} else {
+			checkAllowNsRuleCfgType = share.UserCreated
+			ruleTypes := [2]string{api.ValidatingExceptRuleType, api.ValidatingDenyRuleType}
+		Exit:
+			for _, ruleType := range ruleTypes {
+				if arhs, err := clusHelper.GetAdmissionRuleList(admission.NvAdmValidateType, ruleType); err == nil {
+					for _, arh := range arhs {
+						if arh.CfgType == share.GroundCfg {
+							checkAllowNsRuleCfgType = share.GroundCfg
+							continue Exit
+						}
+					}
+				}
+			}
+		}
+	}
+
 	defAllowedNS := utils.NewSet()     // namespaces in critical(default) allow rules, enabled or not
 	allAllowedNS := utils.NewSet()     // all effectively allowed namespaces that do no contain wildcard character
 	allAllowedNsWild := utils.NewSet() // all effectively allowed namespaces that contain wildcard character
@@ -148,7 +171,7 @@ func initCache() {
 	ruleCaches := [4]*share.CLUSAdmissionRules{&admValidateExceptCache, &admValidateDenyCache, &admFedValidateExceptionCache, &admFedValidateDenyCache}
 	for idx, ruleType := range ruleTypes {
 		arhs, err := clusHelper.GetAdmissionRuleList(admission.NvAdmValidateType, ruleType)
-		if err != nil {
+		if err != nil && err.Error() == cluster.ErrKeyNotFound.Error() {
 			clusHelper.PutAdmissionRuleList(admission.NvAdmValidateType, ruleType, arhs)
 		}
 		ruleCaches[idx].RuleMap = make(map[uint32]*share.CLUSAdmissionRule, len(arhs)) // key is ruleID
@@ -173,7 +196,7 @@ func initCache() {
 				ruleCaches[idx].RuleHeads = append(ruleCaches[idx].RuleHeads, rh)
 
 				if r.RuleType == api.ValidatingExceptRuleType {
-					if qualifiedRule := (r.Critical || r.CfgType == share.FederalCfg); qualifiedRule {
+					if qualifiedRule := (r.Critical || r.CfgType == checkAllowNsRuleCfgType); qualifiedRule {
 						for _, crt := range r.Criteria {
 							if crt.Name != share.CriteriaKeyNamespace || crt.Op != share.CriteriaOpContainsAny {
 								qualifiedRule = false
@@ -215,11 +238,6 @@ func initCache() {
 		setAdmCtrlStateInCluster(admission.NvAdmValidateType, resource.NvAdmSvcName, admStateCache.Enable, &svcAvailable)
 	}
 	updateNvDeployStatus(nil)
-
-	m := clusHelper.GetFedMembership()
-	if m != nil {
-		fedMembershipCache.FedRole = m.FedRole
-	}
 
 	reservedRegs["dockerhub"] = []string{"https://index.docker.io/", "https://registry.hub.docker.com/", "https://registry-1.docker.io/"}
 	reservedRegs["docker.io"] = reservedRegs["dockerhub"]
@@ -396,10 +414,28 @@ func evalAdmCtrlRulesForAllowedNS(admCtrlEnabled bool) {
 	newAllowedNS := utils.NewSet()     // namespaces(without wildcard char) in critical/fed allow rules only
 	newAllowedNsWild := utils.NewSet() // namespaces(with wildcard char) in critical/fed allow rules only
 	if admCtrlEnabled {
+		var checkAllowNsRuleCfgType share.TCfgType
+		fedRole := fedMembershipCache.FedRole
+		if fedRole != api.FedRoleNone {
+			checkAllowNsRuleCfgType = share.FederalCfg
+		} else {
+			checkAllowNsRuleCfgType = share.UserCreated
+			ruleCaches := [2]*share.CLUSAdmissionRules{&admValidateExceptCache, &admValidateDenyCache}
+		Exit:
+			for _, ruleCache := range ruleCaches {
+				for _, r := range ruleCache.RuleMap {
+					if r.CfgType == share.GroundCfg {
+						checkAllowNsRuleCfgType = share.GroundCfg
+						continue Exit
+					}
+				}
+			}
+		}
+
 		for _, allowedRulesCache := range []*share.CLUSAdmissionRules{&admFedValidateExceptionCache, &admValidateExceptCache} {
 			for _, r := range allowedRulesCache.RuleMap {
 				if !r.Disable && r.RuleType == api.ValidatingExceptRuleType && len(r.Criteria) > 0 {
-					if qualifiedRule := (r.Critical || r.CfgType == share.FederalCfg); qualifiedRule {
+					if qualifiedRule := (r.Critical || r.CfgType == checkAllowNsRuleCfgType); qualifiedRule {
 						for _, crt := range r.Criteria {
 							if crt.Name != share.CriteriaKeyNamespace || crt.Op != share.CriteriaOpContainsAny {
 								qualifiedRule = false
@@ -528,12 +564,19 @@ func admissionConfigUpdate(nType cluster.ClusterNotifyType, key string, value []
 			for _, rh := range heads {
 				ids.Add(rh.ID)
 			}
-			for id, _ := range admPolicyCache.RuleMap {
+			evalAllowedNS := false
+			for id, r := range admPolicyCache.RuleMap {
 				if !ids.Contains(id) {
 					delete(admPolicyCache.RuleMap, id)
 					opa.DeletePolicy(id)
 					log.WithFields(log.Fields{"nType": nType, "cfgType": cfgType, "id": id}).Debug("admissionConfigUpdate, delete OPA")
+					if r.RuleType == api.ValidatingExceptRuleType || r.RuleType == share.FedAdmCtrlExceptRulesType {
+						evalAllowedNS = true
+					}
 				}
+			}
+			if evalAllowedNS {
+				evalAdmCtrlRulesForAllowedNS(admStateCache.Enable)
 			}
 		case share.CLUSAdmissionStatistics:
 			var stats share.CLUSAdmissionStats
@@ -548,12 +591,9 @@ func admissionConfigUpdate(nType cluster.ClusterNotifyType, key string, value []
 		switch cfgType {
 		case share.CLUSAdmissionCfgRule:
 			id := share.CLUSPolicyRuleKey2ID(key)
-			if r, ok := admPolicyCache.RuleMap[id]; ok {
+			if _, ok := admPolicyCache.RuleMap[id]; ok {
 				delete(admPolicyCache.RuleMap, id)
 				opa.DeletePolicy(id)
-				if r.RuleType == api.ValidatingExceptRuleType || r.RuleType == share.FedAdmCtrlExceptRulesType {
-					evalAdmCtrlRulesForAllowedNS(admStateCache.Enable)
-				}
 			}
 		case share.CLUSAdmissionCfgRuleList:
 			heads := make([]*share.CLUSRuleHead, 0)
@@ -584,10 +624,10 @@ func isStringCriterionMet(crt *share.CLUSAdmRuleCriterion, value string) (bool, 
 		return strings.Contains(value, crt.Value), true
 	case share.CriteriaOpPrefix:
 		return strings.HasPrefix(value, crt.Value), true
-	case share.CriteriaOpRegex:
+	case share.CriteriaOpRegex, share.CriteriaOpRegex_Deprecated:
 		matched, _ := regexp.MatchString(crt.Value, value)
 		return matched, true
-	case share.CriteriaOpNotRegex:
+	case share.CriteriaOpNotRegex, share.CriteriaOpNotRegex_Deprecated:
 		matched, _ := regexp.MatchString(crt.Value, value)
 		return !matched, false
 	case share.CriteriaOpContainsAll, share.CriteriaOpContainsAny, share.CriteriaOpNotContainsAny, share.CriteriaOpContainsOtherThan,
@@ -724,6 +764,18 @@ func isCveScoreCountCriterionMet(crt *share.CLUSAdmRuleCriterion, highVulInfo, m
 func isSetCriterionMet(crt *share.CLUSAdmRuleCriterion, valueSet utils.Set) (bool, bool) {
 	if valueSet.Cardinality() > 0 {
 		switch crt.Op {
+		case share.CriteriaOpRegex, share.CriteriaOpNotRegex:
+			if regex, err := regexp.Compile(crt.Value); err == nil {
+				for value := range valueSet.Iter() {
+					if regex.MatchString(value.(string)) {
+						if crt.Op == share.CriteriaOpRegex {
+							return true, true
+						} else {
+							return false, false
+						}
+					}
+				}
+			}
 		case share.CriteriaOpContainsAll, share.CriteriaOpContainsAny, share.CriteriaOpNotContainsAny,
 			share.CriteriaOpRegexContainsAny, share.CriteriaOpRegexNotContainsAny:
 			for _, crtValue := range crt.ValueSlice {
@@ -789,9 +841,9 @@ func isSetCriterionMet(crt *share.CLUSAdmRuleCriterion, valueSet utils.Set) (boo
 		} else {
 			return false, true
 		}
-	case share.CriteriaOpContainsAny, share.CriteriaOpRegexContainsAny:
+	case share.CriteriaOpContainsAny, share.CriteriaOpRegexContainsAny, share.CriteriaOpRegex:
 		return false, true
-	case share.CriteriaOpNotContainsAny, share.CriteriaOpRegexNotContainsAny:
+	case share.CriteriaOpNotContainsAny, share.CriteriaOpRegexNotContainsAny, share.CriteriaOpNotRegex:
 		return true, false
 	case share.CriteriaOpContainsOtherThan:
 		return false, true
@@ -1504,9 +1556,9 @@ func getOpDisplay(crt *share.CLUSAdmRuleCriterion) string {
 	switch crt.Op {
 	case share.CriteriaOpEqual, share.CriteriaOpNotEqual, share.CriteriaOpBiggerEqualThan, share.CriteriaOpBiggerThan, share.CriteriaOpLessEqualThan, "":
 		return crt.Op
-	case share.CriteriaOpRegex:
+	case share.CriteriaOpRegex, share.CriteriaOpRegex_Deprecated:
 		return "matches"
-	case share.CriteriaOpNotRegex:
+	case share.CriteriaOpNotRegex, share.CriteriaOpNotRegex_Deprecated:
 		return "does not match"
 	case share.CriteriaOpContainsAll:
 		return "contains all in"
@@ -1580,7 +1632,7 @@ func sameNameCriteriaToString(ruleType string, criteria []*share.CLUSAdmRuleCrit
 					} else {
 						str = fmt.Sprintf("(%s %s {%s})", displayName, opDsiplay, crt.Value)
 					}
-				case share.CriteriaOpRegex:
+				case share.CriteriaOpRegex, share.CriteriaOpRegex_Deprecated:
 					str = fmt.Sprintf("(%s %s regex(%s) )", displayName, opDsiplay, crt.Value)
 				case share.CriteriaOpExist, share.CriteriaOpNotExist:
 					str = fmt.Sprintf("(%s, path %s %s)", displayName, crt.Path, opDsiplay)
@@ -1601,14 +1653,16 @@ func sameNameCriteriaToString(ruleType string, criteria []*share.CLUSAdmRuleCrit
 			str = fmt.Sprintf("(%s)", str)
 		}
 		if !firstCriterion {
-			if !positive && (crt.Op == share.CriteriaOpNotContainsAny || crt.Op == share.CriteriaOpNotEqual || crt.Op == share.CriteriaOpNotRegex) {
+			if !positive && (crt.Op == share.CriteriaOpNotContainsAny || crt.Op == share.CriteriaOpNotEqual ||
+				crt.Op == share.CriteriaOpNotRegex || crt.Op == share.CriteriaOpNotRegex_Deprecated) {
 				sb.WriteString(andDelim)
 			} else {
 				sb.WriteString(orDelim)
 				positive = true
 			}
 		} else {
-			if crt.Op != share.CriteriaOpNotContainsAny && crt.Op != share.CriteriaOpNotEqual && crt.Op != share.CriteriaOpNotRegex {
+			if crt.Op != share.CriteriaOpNotContainsAny && crt.Op != share.CriteriaOpNotEqual &&
+				crt.Op != share.CriteriaOpNotRegex && crt.Op != share.CriteriaOpNotRegex_Deprecated {
 				positive = true
 			}
 		}

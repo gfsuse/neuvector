@@ -866,6 +866,7 @@ type CLUSServerLDAP struct {
 	Port            uint16 `json:"port"`
 	SSL             bool   `json:"ssl"`
 	BaseDN          string `json:"base_dn"`
+	GroupDN         string `json:"group_dn"`
 	BindDN          string `json:"bind_dn"` // Must handle upgrade if it is cloaked
 	BindPasswd      string `json:"bind_password,cloak"`
 	GroupMemberAttr string `json:"group_member_attr"`
@@ -1482,7 +1483,7 @@ type CLUSAuditLog struct {
 	ProjectName  string               `json:"project_name,omitempty"`
 }
 
-const SnifferIdAgentField = 8
+const SnifferIdAgentField = 12
 
 type CLUSComplianceProfileEntry struct {
 	TestNum string   `json:"test_num"`
@@ -1701,6 +1702,7 @@ type CLUSRegistryConfig struct {
 	IBMCloudAccount    string                `json:"ibmcloud_account"`
 	IBMCloudTokenURL   string                `json:"ibmcloud_token_url"`
 	CfgType            TCfgType              `json:"cfg_type"`
+	IgnoreProxy        bool                  `json:"ignore_proxy"`
 }
 
 type CLUSImage struct {
